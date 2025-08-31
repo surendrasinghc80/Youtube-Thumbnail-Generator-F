@@ -2,22 +2,30 @@
 
 import { toast as sonnerToast } from "sonner";
 
-// Optional wrapper for consistency
+// Enhanced toast function that handles both string and object formats
+export const toast = (options) => {
+  if (typeof options === "string") {
+    sonnerToast(options);
+  } else if (options && typeof options === "object") {
+    const { title, description, variant, type } = options;
+    
+    // Handle different variants/types
+    const toastType = variant || type;
+    
+    if (toastType === "destructive" || toastType === "error") {
+      sonnerToast.error(title, { description });
+    } else if (toastType === "success") {
+      sonnerToast.success(title, { description });
+    } else {
+      sonnerToast(title, { description });
+    }
+  }
+};
+
+// Optional wrapper for consistency with existing code
 export function useToast() {
   return {
-    toast: (options) => {
-      if (typeof options === "string") {
-        sonnerToast(options);
-      } else {
-        const { title, description, type = "default" } = options;
-        if (type === "success") sonnerToast.success(title || description);
-        else if (type === "error") sonnerToast.error(title || description);
-        else sonnerToast(title || description);
-      }
-    },
+    toast,
     dismiss: sonnerToast.dismiss,
   };
 }
-
-// Export toast directly
-export const toast = sonnerToast;

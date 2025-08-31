@@ -1,41 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button.jsx";
 import { ThemeToggle } from "@/components/theme-toggle.jsx";
-import { authService } from "@/lib/api/index.js";
 
 export function Header() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: session, status } = useSession();
+  const isLoading = status === "loading";
+  const isAuthenticated = !!session;
 
-  useEffect(() => {
-    // Check authentication status on component mount
-    const checkAuth = () => {
-      const authenticated = authService.isAuthenticated();
-      setIsAuthenticated(authenticated);
-      setIsLoading(false);
-    };
-
-    checkAuth();
-
-    // Listen for storage changes (login/logout in other tabs)
-    const handleStorageChange = (e) => {
-      if (e.key === "auth_token") {
-        checkAuth();
-      }
-    };
-
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
-
-  const handleLogout = () => {
-    authService.logout();
-    setIsAuthenticated(false);
+  const handleLogout = async () => {
+    await signOut({ redirect: false });
     router.push("/");
   };
 

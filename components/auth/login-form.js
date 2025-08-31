@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button.jsx";
 import {
   Card,
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/card.jsx";
 import { Input } from "@/components/ui/input.jsx";
 import { Label } from "@/components/ui/label.jsx";
-import { authService } from "../../lib/api/index.js";
 
 export function LoginForm() {
   const router = useRouter();
@@ -37,14 +37,16 @@ export function LoginForm() {
     if (Object.keys(v).length > 0) return;
     setSubmitting(true);
     try {
-      const result = await authService.login({ email, password });
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
 
-      if (result.success) {
-        // Store token and user data
-        authService.storeToken(result.data.token);
+      if (result?.ok) {
         router.push("/app");
       } else {
-        setErrors({ form: result.error || "Login failed. Please try again." });
+        setErrors({ form: result?.error || "Login failed. Please try again." });
       }
     } catch (err) {
       setErrors({ form: "Unable to log in. Please try again." });

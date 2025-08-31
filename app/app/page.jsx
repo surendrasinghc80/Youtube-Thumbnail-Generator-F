@@ -17,10 +17,13 @@ import { Checkbox } from "@/components/ui/checkbox.jsx";
 import { toast } from "@/hooks/use-toast.js";
 import JSZip from "jszip";
 import { Header } from "@/components/header.jsx";
+import { imageGenerationService, historyService } from "@/lib/api/index.js";
+import { useSession } from "next-auth/react";
 
 const MAX_VARIATIONS = 8;
 
 export default function StudioPage() {
+  const { data: session } = useSession();
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState("");
   const [brief, setBrief] = useState("");
@@ -28,6 +31,7 @@ export default function StudioPage() {
   const [count, setCount] = useState(6);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const inputRef = useRef(null);
   const prevUrlRef = useRef(null);
 
@@ -83,44 +87,72 @@ export default function StudioPage() {
       });
       return;
     }
-    setLoading(true);
-    try {
-      const base = `${title}`.trim() || "YouTube Thumbnail";
-      const styleSeeds = styles.length
-        ? styles
-        : ["Bold Text", "High Contrast", "Minimal", "Color Pop"];
-      const prefersReducedMotion =
-        typeof window !== "undefined" &&
-        window.matchMedia &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const delayMs = prefersReducedMotion ? 0 : 120;
 
-      const items = Array.from({ length: Math.min(count, MAX_VARIATIONS) }).map(
-        (_, i) => {
-          const style = styleSeeds[i % styleSeeds.length];
-          const prompt = `${base} — ${style}${brief ? ` — ${brief}` : ""}${
-            file ? " — with reference" : ""
-          }`;
-          return {
-            id: `${Date.now()}-${i}`,
-            prompt,
-            url: makePlaceholderUrl(1280, 720, prompt),
-            alt: `Thumbnail variation: ${prompt}`,
-          };
-        }
-      );
-      for (let i = 0; i < items.length; i++) {
-        if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
-        setResults((prev) => [...prev, items[i]]);
-      }
+    if (!session) {
       toast({
-        title: "Generated",
-        description: "Preview your variations below.",
+        title: "Authentication required",
+        description: "Please log in to generate thumbnails.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true);
+    setResults([]); // Clear previous results
+
+    try {
+      const requestData = {
+        prompt: title,
+        customPrompt: brief,
+        category: "YouTube",
+        thumbnailStyle:
+          styles.length > 0 ? styles.join(", ") : "Bold Text, High Contrast",
+        imageCount: Math.min(count, MAX_VARIATIONS).toString(),
+        enhancePrompt: true,
+      };
+
+      let result;
+
+      if (file) {
+        // Image-to-image generation
+        const formData = imageGenerationService.createImageFormData(
+          file,
+          requestData
+        );
+        result = await imageGenerationService.generateFromImage(formData);
+      } else {
+        // Text-to-image generation
+        result = await imageGenerationService.generateImages(requestData);
+      }
+
+      if (result.success && result.data.images) {
+        const generatedItems = result.data.images.map((imageUrl, i) => ({
+          id: `${Date.now()}-${i}`,
+          prompt: result.data.prompt || `${title} - ${brief}`,
+          url: imageUrl,
+          alt: `Generated thumbnail ${i + 1}`,
+        }));
+
+        setResults(generatedItems);
+        toast({
+          title: "Generated successfully",
+          description: `Created ${generatedItems.length} thumbnail variations.`,
+        });
+      } else {
+        throw new Error(result.error || "Generation failed");
+      }
+    } catch (error) {
+      console.error("Generation error:", error);
+      toast({
+        title: "Generation failed",
+        description:
+          error.message || "Unable to generate thumbnails. Please try again.",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  }, [title, brief, styles, count, file, makePlaceholderUrl]);
+  }, [title, brief, styles, count, file, session]);
 
   const toggleStyle = useCallback(
     (s, checked) => {
@@ -134,6 +166,62 @@ export default function StudioPage() {
   const clearResults = useCallback(() => {
     setResults([]);
   }, []);
+
+  // Load user's generation history
+  const loadHistory = useCallback(async () => {
+    if (!session) return;
+
+    setHistoryLoading(true);
+    try {
+      const result = await historyService.getHistory(10, 0);
+      if (result.success && result.data.history) {
+        const historyItems = result.data.history.map((item, i) => ({
+          id: `history-${item._id || i}`,
+          prompt:
+            item.finalPrompt || item.originalPrompt || "Generated thumbnail",
+          url: item.imageUrls?.[0] || "/placeholder.svg",
+          alt: `History: ${item.finalPrompt || item.originalPrompt}`,
+          isHistory: true,
+          historyId: item._id,
+        }));
+        setResults(historyItems);
+      }
+    } catch (error) {
+      console.error("Failed to load history:", error);
+      toast({
+        title: "Failed to load history",
+        description: "Unable to load your previous generations.",
+        variant: "destructive",
+      });
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [session]);
+
+  // Clear all history
+  const clearHistory = useCallback(async () => {
+    if (!session) return;
+
+    try {
+      const result = await historyService.clearHistory();
+      if (result.success) {
+        setResults([]);
+        toast({
+          title: "History cleared",
+          description: "All your generation history has been cleared.",
+        });
+      } else {
+        throw new Error(result.error || "Failed to clear history");
+      }
+    } catch (error) {
+      console.error("Failed to clear history:", error);
+      toast({
+        title: "Failed to clear history",
+        description: error.message || "Unable to clear history.",
+        variant: "destructive",
+      });
+    }
+  }, [session]);
 
   return (
     <main
@@ -286,9 +374,16 @@ export default function StudioPage() {
           </CardContent>
           <CardFooter className="flex items-center justify-between">
             <div className="text-xs text-muted-foreground">
-              Local-only preview. Actions work in your browser.
+              AI-powered thumbnail generation
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={loadHistory}
+                disabled={historyLoading || !session}
+              >
+                {historyLoading ? "Loading..." : "Load History"}
+              </Button>
               <Button
                 variant="outline"
                 onClick={clearResults}
@@ -299,7 +394,7 @@ export default function StudioPage() {
               <Button
                 className="bg-blue-600 hover:bg-blue-700"
                 onClick={handleGenerate}
-                disabled={loading}
+                disabled={loading || !session}
               >
                 {loading ? "Generating…" : "Generate"}
               </Button>
@@ -315,6 +410,7 @@ export default function StudioPage() {
 
 function ResultsSection({ results, setResults }) {
   const [zipping, setZipping] = useState(false);
+  const { data: session } = useSession();
 
   const toggleFavorite = useCallback(
     (id) => {

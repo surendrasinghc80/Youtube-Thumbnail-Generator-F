@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card.jsx";
 import { Input } from "@/components/ui/input.jsx";
 import { Label } from "@/components/ui/label.jsx";
-import { authService } from "../../lib/api/index.js";
+import { signIn } from "next-auth/react";
 
 export function SignupForm() {
   const router = useRouter();
@@ -43,12 +43,23 @@ export function SignupForm() {
     if (Object.keys(v).length > 0) return;
     setSubmitting(true);
     try {
+      // First create the account via API
+      const { authService } = await import("../../lib/api/index.js");
       const result = await authService.signup({ name, email, password });
 
       if (result.success) {
-        // Store token and user data
-        authService.storeToken(result.data.token);
-        router.push("/app");
+        // Then sign in with NextAuth
+        const signInResult = await signIn("credentials", {
+          email,
+          password,
+          redirect: false,
+        });
+
+        if (signInResult?.ok) {
+          router.push("/app");
+        } else {
+          setErrors({ form: "Account created but login failed. Please try logging in." });
+        }
       } else {
         setErrors({ form: result.error || "Signup failed. Please try again." });
       }

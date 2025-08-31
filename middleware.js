@@ -1,42 +1,48 @@
-import { NextResponse } from 'next/server';
+import { withAuth } from "next-auth/middleware";
+import { NextResponse } from "next/server";
 
-export function middleware(request) {
-  const { pathname } = request.nextUrl;
-  
-  // Get the auth token from cookies or headers
-  const authToken = request.cookies.get('auth_token')?.value || 
-                   request.headers.get('authorization')?.replace('Bearer ', '');
+export default withAuth(
+  function middleware(req) {
+    const { pathname } = req.nextUrl;
+    const token = req.nextauth.token;
 
-  // Protected routes that require authentication
-  const protectedRoutes = ['/app'];
-  
-  // Auth routes that should redirect to /app if already authenticated
-  const authRoutes = ['/login', '/signup'];
-  
-  // Check if current path is protected
-  const isProtectedRoute = protectedRoutes.some(route => 
-    pathname.startsWith(route)
-  );
-  
-  // Check if current path is an auth route
-  const isAuthRoute = authRoutes.some(route => 
-    pathname.startsWith(route)
-  );
+    // Auth routes that should redirect to /app if already authenticated
+    const authRoutes = ["/login", "/signup"];
 
-  // If user is not authenticated and trying to access protected route
-  if (isProtectedRoute && !authToken) {
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
+    // Check if current path is an auth route
+    const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
+
+    // If user is authenticated and trying to access auth routes, redirect to app
+    if (isAuthRoute && token) {
+      return NextResponse.redirect(new URL("/app", req.url));
+    }
+
+    return NextResponse.next();
+  },
+  {
+    callbacks: {
+      authorized: ({ token, req }) => {
+        const { pathname } = req.nextUrl;
+
+        // Protected routes that require authentication
+        const protectedRoutes = ["/app"];
+
+        // Check if current path is protected
+        const isProtectedRoute = protectedRoutes.some((route) =>
+          pathname.startsWith(route)
+        );
+
+        // Allow access to non-protected routes
+        if (!isProtectedRoute) {
+          return true;
+        }
+
+        // For protected routes, require authentication
+        return !!token;
+      },
+    },
   }
-
-  // If user is authenticated and trying to access auth routes, redirect to app
-  if (isAuthRoute && authToken) {
-    return NextResponse.redirect(new URL('/app', request.url));
-  }
-
-  return NextResponse.next();
-}
+);
 
 export const config = {
   matcher: [
@@ -48,6 +54,6 @@ export const config = {
      * - favicon.ico (favicon file)
      * - public folder
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|public).*)',
+    "/((?!api|_next/static|_next/image|favicon.ico|public).*)",
   ],
 };
